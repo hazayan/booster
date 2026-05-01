@@ -43,6 +43,10 @@ type generatorConfig struct {
 	enableZfs               bool
 	zfsImportParams         string
 	zfsCachePath            string
+	zfsClevisJweAttr        string
+	zfsClevisPinAttr        string
+	zfsClevisKeyFormat      string
+	zfsClevisTimeout        time.Duration
 
 	enablePlymouth bool
 
@@ -491,6 +495,10 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	initConfig.EnableMdraid = conf.enableMdraid
 	initConfig.EnableZfs = conf.enableZfs
 	initConfig.ZfsImportParams = conf.zfsImportParams
+	initConfig.ZfsClevisJweAttr = conf.zfsClevisJweAttr
+	initConfig.ZfsClevisPinAttr = conf.zfsClevisPinAttr
+	initConfig.ZfsClevisKeyFormat = conf.zfsClevisKeyFormat
+	initConfig.ZfsClevisTimeout = int(conf.zfsClevisTimeout.Seconds())
 	initConfig.EnablePlymouth = conf.enablePlymouth
 
 	if conf.networkConfigType == netDhcp {

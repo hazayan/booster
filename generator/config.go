@@ -39,9 +39,15 @@ type UserConfig struct {
 	EnableZfs            bool   `yaml:"enable_zfs"`
 	ZfsImportParams      string `yaml:"zfs_import_params"`
 	ZfsCachePath         string `yaml:"zfs_cache_path"`
-	EnablePlymouth       bool   `yaml:"enable_plymouth"`
-	CrypttabPath         string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
-	EnableFido2          bool   `yaml:"enable_fido2"`
+	ZfsClevisAttrs       *struct {
+		Jwe string `yaml:"jwe,omitempty"`
+		Pin string `yaml:"pin,omitempty"`
+	} `yaml:"zfs_clevis_attrs,omitempty"`
+	ZfsClevisKeyFormat string `yaml:"zfs_clevis_key_format,omitempty"`
+	ZfsClevisTimeout   string `yaml:"zfs_clevis_timeout,omitempty"`
+	EnablePlymouth     bool   `yaml:"enable_plymouth"`
+	CrypttabPath       string `yaml:"crypttab_path,omitempty"` // path to crypttab file, defaults to /etc/crypttab
+	EnableFido2        bool   `yaml:"enable_fido2"`
 }
 
 func parseCommaList(raw string) []string {
@@ -159,6 +165,26 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.enableZfs = u.EnableZfs
 	conf.zfsImportParams = u.ZfsImportParams
 	conf.zfsCachePath = u.ZfsCachePath
+	if u.ZfsClevisAttrs != nil {
+		conf.zfsClevisJweAttr = strings.TrimSpace(u.ZfsClevisAttrs.Jwe)
+		conf.zfsClevisPinAttr = strings.TrimSpace(u.ZfsClevisAttrs.Pin)
+	}
+	conf.zfsClevisKeyFormat = strings.TrimSpace(u.ZfsClevisKeyFormat)
+	switch conf.zfsClevisKeyFormat {
+	case "", "plaintext", "raw":
+	default:
+		return nil, fmt.Errorf("Unsupported ZFS clevis key format %q", conf.zfsClevisKeyFormat)
+	}
+	if u.ZfsClevisTimeout != "" {
+		timeout, err := time.ParseDuration(u.ZfsClevisTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to parse ZFS clevis timeout value: %v", err)
+		}
+		if timeout <= 0 {
+			return nil, fmt.Errorf("ZFS clevis timeout must be positive")
+		}
+		conf.zfsClevisTimeout = timeout
+	}
 	conf.enablePlymouth = u.EnablePlymouth
 	conf.enableVirtualConsole = u.EnableVirtualConsole
 	if conf.enableVirtualConsole {

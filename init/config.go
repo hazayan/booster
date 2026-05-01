@@ -34,6 +34,10 @@ type InitConfig struct {
 	EnableMdraid           bool                `yaml:",omitempty"`
 	EnableZfs              bool                `yaml:",omitempty"`
 	ZfsImportParams        string              `yaml:",omitempty"` // TODO: remove it
+	ZfsClevisJweAttr       string              `yaml:",omitempty"`
+	ZfsClevisPinAttr       string              `yaml:",omitempty"`
+	ZfsClevisKeyFormat     string              `yaml:",omitempty"`
+	ZfsClevisTimeout       int                 `yaml:",omitempty"` // ZFS clevis timeout in seconds
 	EnablePlymouth         bool                `yaml:",omitempty"`
 }
 

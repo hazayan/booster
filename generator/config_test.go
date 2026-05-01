@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -43,4 +44,53 @@ network:
 	require.Equal(t, []string{"usbhid", "hid_generic"}, c.modulesForceLoad)
 	require.Equal(t, []string{"/bin/ls", "/bin/cat"}, c.extraFiles)
 	require.Len(t, c.networkActiveInterfaces, 2)
+}
+
+func TestReadConfigZfsClevisAttrs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+enable_zfs: true
+zfs_clevis_attrs:
+  jwe: site:clevis_jwe
+  pin: site:clevis_pin
+zfs_clevis_key_format: raw
+zfs_clevis_timeout: 45s
+`), 0o644))
+
+	c, err := readGeneratorConfig(cfgPath)
+	require.NoError(t, err)
+	require.True(t, c.enableZfs)
+	require.Equal(t, "site:clevis_jwe", c.zfsClevisJweAttr)
+	require.Equal(t, "site:clevis_pin", c.zfsClevisPinAttr)
+	require.Equal(t, "raw", c.zfsClevisKeyFormat)
+	require.Equal(t, 45*time.Second, c.zfsClevisTimeout)
+}
+
+func TestReadConfigZfsClevisRejectsInvalidKeyFormat(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+zfs_clevis_key_format: bogus
+`), 0o644))
+
+	_, err := readGeneratorConfig(cfgPath)
+	require.ErrorContains(t, err, `Unsupported ZFS clevis key format "bogus"`)
+}
+
+func TestReadConfigZfsClevisRejectsNonPositiveTimeout(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+zfs_clevis_timeout: 0s
+`), 0o644))
+
+	_, err := readGeneratorConfig(cfgPath)
+	require.ErrorContains(t, err, "ZFS clevis timeout must be positive")
 }

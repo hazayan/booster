@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -289,6 +290,42 @@ func readGeneratedInitConfig(t *testing.T, workDir string) InitConfig {
 	var cfg InitConfig
 	require.NoError(t, yaml.Unmarshal(c, &cfg))
 	return cfg
+}
+
+func TestAppendInitConfigZfsClevisAttrs(t *testing.T) {
+	t.Parallel()
+
+	img, imgPath := newTestImage(t)
+	conf := &generatorConfig{
+		kernelVersion:      "matestkernel",
+		enableZfs:          true,
+		zfsClevisJweAttr:   "site:clevis_jwe",
+		zfsClevisPinAttr:   "site:clevis_pin",
+		zfsClevisKeyFormat: "raw",
+		zfsClevisTimeout:   45 * time.Second,
+		modulesForceLoad:   []string{"zfs"},
+		networkConfigType:  netDhcp,
+	}
+	kmod := &Kmod{
+		dependencies:      map[string][]string{},
+		postDependencies:  map[string][]string{},
+		builtinModules:    set{},
+		modprobeOptions:   map[string]string{},
+		requiredModules:   set{},
+		nameToPathMapping: NewBimap(),
+	}
+
+	require.NoError(t, img.appendInitConfig(conf, kmod, nil))
+
+	var cfg InitConfig
+	require.NoError(t, yaml.Unmarshal(readImageFile(t, img, imgPath, initConfigPath), &cfg))
+	require.True(t, cfg.EnableZfs)
+	require.Equal(t, "site:clevis_jwe", cfg.ZfsClevisJweAttr)
+	require.Equal(t, "site:clevis_pin", cfg.ZfsClevisPinAttr)
+	require.Equal(t, "raw", cfg.ZfsClevisKeyFormat)
+	require.Equal(t, 45, cfg.ZfsClevisTimeout)
+	require.NotNil(t, cfg.Network)
+	require.True(t, cfg.Network.Dhcp)
 }
 
 func TestSimple(t *testing.T) {

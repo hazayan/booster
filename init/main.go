@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +15,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 
+	"github.com/anatol/clevis.go"
 	"github.com/yookoala/realpath"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
@@ -22,6 +26,11 @@ import (
 
 const (
 	newRoot = "/booster.root"
+
+	defaultZfsClevisJweAttr    = "clevis:jwe"
+	defaultZfsClevisPinAttr    = "clevis:pin"
+	defaultZfsClevisKeyFormat  = "plaintext"
+	defaultZfsClevisTimeoutSec = 30
 )
 
 var (
@@ -48,7 +57,10 @@ var (
 
 	zfsDataset string
 
-	errRootMountTimeout = fmt.Errorf("Timeout waiting for root filesystem")
+	errRootMountTimeout   = fmt.Errorf("Timeout waiting for root filesystem")
+	errNoZfsClevisBinding = fmt.Errorf("no ZFS clevis binding found")
+
+	clevisHTTPClientMu sync.Mutex
 )
 
 type set map[string]bool
@@ -1219,7 +1231,172 @@ func getZfsPropertyValue(property, dataset string) (string, error) {
 	return strings.TrimSpace(string(val)), nil
 }
 
+func getOptionalZfsPropertyValue(property, dataset string) (string, bool, error) {
+	value, err := getZfsPropertyValue(property, dataset)
+	if err != nil {
+		return "", false, err
+	}
+	if value == "" || value == "-" {
+		return "", false, nil
+	}
+	return value, true, nil
+}
+
+func zfsKeyUsesTextLines(keyformat string) bool {
+	return keyformat != "raw"
+}
+
+func zfsRawKeyStdinMaterial(zfsKeyformat string, key []byte) ([]byte, error) {
+	switch zfsKeyformat {
+	case "passphrase":
+		if utf8.Valid(key) {
+			return append([]byte(nil), key...), nil
+		}
+		return []byte(hex.EncodeToString(key)), nil
+	case "hex":
+		return []byte(hex.EncodeToString(key)), nil
+	case "raw":
+		if len(key) != 32 {
+			return nil, fmt.Errorf("raw ZFS keys must be 32 bytes, got %d", len(key))
+		}
+		return append([]byte(nil), key...), nil
+	default:
+		return nil, fmt.Errorf("unsupported ZFS keyformat %q", zfsKeyformat)
+	}
+}
+
+func zfsClevisKeyStdinMaterial(clevisKeyFormat, zfsKeyformat string, key []byte) ([]byte, error) {
+	switch clevisKeyFormat {
+	case "", "plaintext":
+		if zfsKeyformat == "raw" {
+			return nil, fmt.Errorf("ZFS clevis key format %q cannot be used with raw ZFS keys", clevisKeyFormat)
+		}
+		return append([]byte(nil), key...), nil
+	case "raw":
+		return zfsRawKeyStdinMaterial(zfsKeyformat, key)
+	default:
+		return nil, fmt.Errorf("unsupported ZFS clevis key format %q", clevisKeyFormat)
+	}
+}
+
+func zfsClevisTimeout() time.Duration {
+	if config.ZfsClevisTimeout > 0 {
+		return time.Duration(config.ZfsClevisTimeout) * time.Second
+	}
+	return defaultZfsClevisTimeoutSec * time.Second
+}
+
+func decryptClevisWithTimeout(jwe []byte, timeout time.Duration) ([]byte, error) {
+	clevisHTTPClientMu.Lock()
+	defer clevisHTTPClientMu.Unlock()
+
+	oldClient := http.DefaultClient
+	if timeout > 0 {
+		http.DefaultClient = &http.Client{Timeout: timeout}
+	}
+	defer func() {
+		http.DefaultClient = oldClient
+	}()
+
+	return clevis.Decrypt(jwe)
+}
+
+func loadZfsKeyFromStdin(encryptionRoot string, key []byte) error {
+	zfsKeyformat, err := getZfsPropertyValue("keyformat", encryptionRoot)
+	if err != nil {
+		return err
+	}
+	clevisKeyFormat := strings.TrimSpace(config.ZfsClevisKeyFormat)
+	if clevisKeyFormat == "" {
+		clevisKeyFormat = defaultZfsClevisKeyFormat
+	}
+	material, err := zfsClevisKeyStdinMaterial(clevisKeyFormat, zfsKeyformat, key)
+	if err != nil {
+		return err
+	}
+	defer memZeroBytes(material)
+
+	zfsLoadKey := exec.Command("zfs", "load-key", "-L", "prompt", encryptionRoot)
+	stdin, err := zfsLoadKey.StdinPipe()
+	if err != nil {
+		return err
+	}
+	zfsLoadKey.Stdout = os.Stdout
+	zfsLoadKey.Stderr = os.Stderr
+
+	if err := zfsLoadKey.Start(); err != nil {
+		return err
+	}
+
+	if _, err := stdin.Write(material); err != nil {
+		_ = stdin.Close()
+		_ = zfsLoadKey.Wait()
+		return err
+	}
+	if zfsKeyUsesTextLines(zfsKeyformat) {
+		if _, err := stdin.Write([]byte{'\n'}); err != nil {
+			_ = stdin.Close()
+			_ = zfsLoadKey.Wait()
+			return err
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		_ = zfsLoadKey.Wait()
+		return err
+	}
+
+	return zfsLoadKey.Wait()
+}
+
+func loadZfsClevisKey(encryptionRoot string) error {
+	jweAttr := config.ZfsClevisJweAttr
+	if jweAttr == "" {
+		jweAttr = defaultZfsClevisJweAttr
+	}
+	pinAttr := config.ZfsClevisPinAttr
+	if pinAttr == "" {
+		pinAttr = defaultZfsClevisPinAttr
+	}
+
+	jwe, ok, err := getOptionalZfsPropertyValue(jweAttr, encryptionRoot)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errNoZfsClevisBinding
+	}
+
+	pin := ""
+	if value, ok, err := getOptionalZfsPropertyValue(pinAttr, encryptionRoot); err != nil {
+		return err
+	} else if ok {
+		pin = value
+	}
+
+	timeout := zfsClevisTimeout()
+	if pin != "" {
+		info("trying ZFS clevis %s unlock for %s with %s timeout", pin, encryptionRoot, timeout)
+	} else {
+		info("trying ZFS clevis unlock for %s with %s timeout", encryptionRoot, timeout)
+	}
+
+	key, err := decryptClevisWithTimeout([]byte(jwe), timeout)
+	if err != nil {
+		return err
+	}
+	defer memZeroBytes(key)
+
+	return loadZfsKeyFromStdin(encryptionRoot, key)
+}
+
 func loadZfsKey(encryptionRoot string) error {
+	if err := loadZfsClevisKey(encryptionRoot); err == nil {
+		info("loaded ZFS key for %s from clevis binding", encryptionRoot)
+		return nil
+	} else if !errors.Is(err, errNoZfsClevisBinding) {
+		warning("loading ZFS key for %s from clevis binding failed: %v", encryptionRoot, err)
+	}
+
 	for {
 		zfsLoadKey := exec.Command("zfs", "load-key", encryptionRoot)
 		zfsLoadKey.Stdin = os.Stdin
