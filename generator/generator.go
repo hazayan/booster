@@ -20,6 +20,7 @@ type generatorConfig struct {
 	networkConfigType       netConfigType
 	networkStaticConfig     *networkStaticConfig
 	networkActiveInterfaces []net.HardwareAddr
+	networkWifi             *networkWifiConfig
 	universal               bool
 	modules                 []string // extra modules to add
 	modulesForceLoad        []string // extra modules to load at the boot time
@@ -62,6 +63,12 @@ type networkStaticConfig struct {
 	ip         string
 	gateway    string
 	dnsServers string // comma-separated list
+}
+
+type networkWifiConfig struct {
+	ssid              string
+	passphrase        string
+	wpaSupplicantPath string
 }
 
 type netConfigType int
@@ -158,6 +165,11 @@ func generateInitRamfs(conf *generatorConfig) error {
 
 	if err := img.appendExtraFiles(conf.extraFiles...); err != nil {
 		return err
+	}
+	if conf.networkWifi != nil {
+		if err := img.appendWpaSupplicantSupport(conf.networkWifi); err != nil {
+			return err
+		}
 	}
 
 	kmod, err := NewKmod(conf)
@@ -304,6 +316,11 @@ func generateInitRamfs(conf *generatorConfig) error {
 		// connected at build time. Include them unconditionally so the key
 		// is recognized when plugged in during the passphrase prompt.
 		if err := kmod.activateModules(false, false, "usbhid", "hid_generic"); err != nil {
+			return err
+		}
+	}
+	if conf.networkWifi != nil {
+		if err := kmod.activateModules(false, false, "cfg80211", "mac80211"); err != nil {
 			return err
 		}
 	}
@@ -513,6 +530,16 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	if conf.networkActiveInterfaces != nil {
 		initConfig.Network.Interfaces = conf.networkActiveInterfaces
 	}
+	if conf.networkWifi != nil {
+		if initConfig.Network == nil {
+			initConfig.Network = &InitNetworkConfig{}
+		}
+		initConfig.Network.Wifi = &InitWifiConfig{
+			SSID:              conf.networkWifi.ssid,
+			Passphrase:        conf.networkWifi.passphrase,
+			WpaSupplicantPath: wpaSupplicantImagePath(conf.networkWifi),
+		}
+	}
 
 	content, err := yaml.Marshal(initConfig)
 	if err != nil {
@@ -520,6 +547,45 @@ func (img *Image) appendInitConfig(conf *generatorConfig, kmod *Kmod, vconsole *
 	}
 
 	return img.AppendContent(initConfigPath, 0o644, content)
+}
+
+func wpaSupplicantImagePath(wifi *networkWifiConfig) string {
+	if wifi.wpaSupplicantPath != "" {
+		return filepath.Clean(wifi.wpaSupplicantPath)
+	}
+	return "/usr/bin/wpa_supplicant"
+}
+
+func wpaSupplicantHostPath(wifi *networkWifiConfig) (string, error) {
+	if wifi.wpaSupplicantPath != "" {
+		return filepath.Clean(wifi.wpaSupplicantPath), nil
+	}
+	return lookupPath("wpa_supplicant")
+}
+
+func wpaSupplicantConfig(wifi *networkWifiConfig) []byte {
+	return []byte(fmt.Sprintf(
+		"ctrl_interface=/run/wpa_supplicant\nupdate_config=0\n\nnetwork={\n    ssid=%q\n    psk=%q\n}\n",
+		wifi.ssid,
+		wifi.passphrase,
+	))
+}
+
+func (img *Image) appendWpaSupplicantSupport(wifi *networkWifiConfig) error {
+	hostPath, err := wpaSupplicantHostPath(wifi)
+	if err != nil {
+		return err
+	}
+	imagePath := wpaSupplicantImagePath(wifi)
+	content, err := os.ReadFile(hostPath)
+	if err != nil {
+		return err
+	}
+	if err := img.AppendContent(imagePath, 0o755, content); err != nil {
+		return err
+	}
+
+	return img.AppendContent("/etc/wpa_supplicant/booster.conf", 0o600, wpaSupplicantConfig(wifi))
 }
 
 func (img *Image) appendAliasesFile(aliases []alias) error {

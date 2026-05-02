@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,11 @@ import (
 )
 
 var initializedNetworkState struct {
+	sync.Mutex
+	ifnames []string
+}
+
+var wpaSupplicantState struct {
 	sync.Mutex
 	ifnames []string
 }
@@ -130,6 +136,74 @@ func shutdownNetwork() {
 	}
 }
 
+func rememberWpaSupplicantInterface(ifname string) bool {
+	wpaSupplicantState.Lock()
+	defer wpaSupplicantState.Unlock()
+
+	if slices.Contains(wpaSupplicantState.ifnames, ifname) {
+		return false
+	}
+	wpaSupplicantState.ifnames = append(wpaSupplicantState.ifnames, ifname)
+	return true
+}
+
+func startWpaSupplicant(ifname string) error {
+	wifi := config.Network.Wifi
+	if wifi == nil {
+		return nil
+	}
+
+	if !rememberWpaSupplicantInterface(ifname) {
+		return nil
+	}
+
+	wpaSupplicantPath := strings.TrimSpace(wifi.WpaSupplicantPath)
+	if wpaSupplicantPath == "" {
+		wpaSupplicantPath = "/usr/bin/wpa_supplicant"
+	}
+	if err := os.MkdirAll("/run/wpa_supplicant", 0o755); err != nil {
+		return err
+	}
+
+	info("starting wpa_supplicant for Wi-Fi network %q on %s", wifi.SSID, ifname)
+	cmd := exec.Command(
+		wpaSupplicantPath,
+		"-i", ifname,
+		"-c", "/etc/wpa_supplicant/booster.conf",
+		"-D", "nl80211,wext",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting wpa_supplicant: %w", err)
+	}
+	return nil
+}
+
+func isWirelessInterface(ifname string) bool {
+	_, err := os.Stat("/sys/class/net/" + ifname + "/wireless")
+	return err == nil
+}
+
+func waitForWifiCarrier(ifname string) error {
+	if config.Network.Wifi == nil || !isWirelessInterface(ifname) {
+		return nil
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		carrier, err := os.ReadFile("/sys/class/net/" + ifname + "/carrier")
+		if err == nil && strings.TrimSpace(string(carrier)) == "1" {
+			return nil
+		}
+		operstate, err := os.ReadFile("/sys/class/net/" + ifname + "/operstate")
+		if err == nil && strings.TrimSpace(string(operstate)) == "up" {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("%s: timeout waiting for Wi-Fi association", ifname)
+}
+
 func initializeNetworkInterface(ifname string) error {
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
@@ -157,6 +231,12 @@ func initializeNetworkInterface(ifname string) error {
 	}
 	rememberInitializedInterface(ifname)
 
+	if isWirelessInterface(ifname) {
+		if err := startWpaSupplicant(ifname); err != nil {
+			return err
+		}
+	}
+
 	timeout := time.After(20 * time.Second)
 	debug("%s waiting interface to be UP", ifname)
 linkReadinessLoop:
@@ -173,6 +253,9 @@ linkReadinessLoop:
 	}
 
 	c := config.Network
+	if err := waitForWifiCarrier(ifname); err != nil {
+		return err
+	}
 	if c.Dhcp {
 		debug("%s: run DHCP", ifname)
 		if err := runDhcp(ifname); err != nil {

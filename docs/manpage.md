@@ -19,6 +19,10 @@ Booster advantages:
     network:
       interfaces: enp0s31f2,2e:1d:61:30:a3:63
       dhcp: on
+      wifi:
+        ssid: example
+        passphrase: correct-horse-battery-staple
+        # wpa_supplicant_path: /usr/bin/wpa_supplicant
       # either dhcp above or static configuration below can be used
       ip: 10.0.2.15/24
       gateway: 10.0.2.255
@@ -45,6 +49,7 @@ Booster advantages:
     The `network` node also accepts `interfaces` property - a comma-separated list of network interfaces (specified either with name or MAC address) to enable at the boot time.
     Network names like `enp0s31f6` get resolved to MAC addresses at generation time and then passed to init.
     If `interfaces` node is not specified then all the interfaces are activated at boot.
+    The optional `wifi` node enables wpa_supplicant-based Wi-Fi association before DHCP/static IP configuration. Booster bundles wpa_supplicant and a generated PSK config for `ssid`; starts wpa_supplicant when a wireless interface appears; waits for association; and then continues with the configured IP setup. If wpa_supplicant is not in `PATH`, set `wpa_supplicant_path`.
 
  * `universal` is a boolean flag that tells booster to generate a universal image. By default booster generates a host-specific image that includes kernel modules used at the current host. For example if the host does not have a TPM2 chip then tpm modules are ignored. Universal image includes many kernel modules and tools that might be needed at a broad range of hardware configurations.
 

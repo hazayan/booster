@@ -46,6 +46,45 @@ network:
 	require.Len(t, c.networkActiveInterfaces, 2)
 }
 
+func TestReadConfigWifi(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+network:
+  dhcp: true
+  wifi:
+    ssid: testnet
+    passphrase: correct-horse-battery-staple
+    wpa_supplicant_path: /custom/wpa_supplicant
+`), 0o644))
+
+	c, err := readGeneratorConfig(cfgPath)
+	require.NoError(t, err)
+	require.Equal(t, netDhcp, c.networkConfigType)
+	require.NotNil(t, c.networkWifi)
+	require.Equal(t, "testnet", c.networkWifi.ssid)
+	require.Equal(t, "correct-horse-battery-staple", c.networkWifi.passphrase)
+	require.Equal(t, "/custom/wpa_supplicant", c.networkWifi.wpaSupplicantPath)
+}
+
+func TestReadConfigWifiRequiresSSIDAndPassphrase(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+network:
+  dhcp: true
+  wifi:
+    ssid: testnet
+`), 0o644))
+
+	_, err := readGeneratorConfig(cfgPath)
+	require.ErrorContains(t, err, "network.wifi.passphrase is required")
+}
+
 func TestReadConfigZfsClevisAttrs(t *testing.T) {
 	t.Parallel()
 

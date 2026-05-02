@@ -23,6 +23,11 @@ type UserConfig struct {
 		IP         string `yaml:",omitempty"`            // e.g. 10.0.2.15/24
 		Gateway    string `yaml:",omitempty"`            // e.g. 10.0.2.255
 		DNSServers string `yaml:"dns_servers,omitempty"` // comma-separated list of ips, e.g. 10.0.1.1,8.8.8.8
+		Wifi       *struct {
+			SSID              string `yaml:"ssid,omitempty"`
+			Passphrase        string `yaml:"passphrase,omitempty"`
+			WpaSupplicantPath string `yaml:"wpa_supplicant_path,omitempty"`
+		} `yaml:"wifi,omitempty"`
 	}
 	Universal            bool   `yaml:",omitempty"`
 	Modules              string `yaml:",omitempty"`                   // comma separated list of extra modules to add to initramfs
@@ -114,6 +119,26 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 			// TODO: or maybe instead of resolving it to MAC address here we should compute predictable interface names
 			// in init? See the algorithm https://github.com/systemd/systemd/blob/main/src/udev/udev-builtin-net_id.c
 			conf.networkActiveInterfaces = append(conf.networkActiveInterfaces, ifc.HardwareAddr)
+		}
+
+		if n.Wifi != nil {
+			if n.Wifi.SSID == "" {
+				return nil, fmt.Errorf("config: network.wifi.ssid is required")
+			}
+			if n.Wifi.Passphrase == "" {
+				return nil, fmt.Errorf("config: network.wifi.passphrase is required")
+			}
+			if strings.ContainsAny(n.Wifi.SSID, "\x00/\n\r") {
+				return nil, fmt.Errorf("config: network.wifi.ssid contains unsupported characters")
+			}
+			if strings.ContainsAny(n.Wifi.Passphrase, "\x00\n\r") {
+				return nil, fmt.Errorf("config: network.wifi.passphrase contains unsupported characters")
+			}
+			conf.networkWifi = &networkWifiConfig{
+				ssid:              n.Wifi.SSID,
+				passphrase:        n.Wifi.Passphrase,
+				wpaSupplicantPath: n.Wifi.WpaSupplicantPath,
+			}
 		}
 	}
 	conf.universal = u.Universal || opts.BuildCommand.Universal

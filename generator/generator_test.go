@@ -328,6 +328,39 @@ func TestAppendInitConfigZfsClevisAttrs(t *testing.T) {
 	require.True(t, cfg.Network.Dhcp)
 }
 
+func TestAppendInitConfigWifi(t *testing.T) {
+	t.Parallel()
+
+	img, imgPath := newTestImage(t)
+	conf := &generatorConfig{
+		networkConfigType: netDhcp,
+		networkWifi: &networkWifiConfig{
+			ssid:              "testnet",
+			passphrase:        "correct-horse-battery-staple",
+			wpaSupplicantPath: "/custom/wpa_supplicant",
+		},
+	}
+	kmod := &Kmod{
+		dependencies:      map[string][]string{},
+		postDependencies:  map[string][]string{},
+		builtinModules:    set{},
+		modprobeOptions:   map[string]string{},
+		requiredModules:   set{},
+		nameToPathMapping: NewBimap(),
+	}
+
+	require.NoError(t, img.appendInitConfig(conf, kmod, nil))
+
+	var cfg InitConfig
+	require.NoError(t, yaml.Unmarshal(readImageFile(t, img, imgPath, initConfigPath), &cfg))
+	require.NotNil(t, cfg.Network)
+	require.True(t, cfg.Network.Dhcp)
+	require.NotNil(t, cfg.Network.Wifi)
+	require.Equal(t, "testnet", cfg.Network.Wifi.SSID)
+	require.Equal(t, "correct-horse-battery-staple", cfg.Network.Wifi.Passphrase)
+	require.Equal(t, "/custom/wpa_supplicant", cfg.Network.Wifi.WpaSupplicantPath)
+}
+
 func TestSimple(t *testing.T) {
 	createTestInitRamfs(t, &options{})
 }
@@ -663,9 +696,9 @@ func TestDeterministicImage(t *testing.T) {
 
 	aliases := []alias{
 		{"crypto_aes", "aes"},
-		{"crypto_aes", "cbc"},       // same pattern, two modules
+		{"crypto_aes", "cbc"}, // same pattern, two modules
 		{"crypto_chacha20", "chacha20"},
-		{"crypto_chacha20", "cbc"},  // same pattern, two modules
+		{"crypto_chacha20", "cbc"}, // same pattern, two modules
 		{"fs_ext4", "ext4"},
 		{"fs_btrfs", "btrfs"},
 	}
