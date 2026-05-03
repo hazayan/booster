@@ -35,3 +35,5 @@ generator/assets/*.ko*
 generator/assets/*.mod
 generator/assets/*.mod.*
 generator/assets/*.o
+AGENTS.md
+.claude/
