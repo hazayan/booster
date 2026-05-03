@@ -1232,6 +1232,23 @@ func getZfsPropertyValue(property, dataset string) (string, error) {
 	return strings.TrimSpace(string(val)), nil
 }
 
+func getLocalZfsPropertyValue(property, dataset string) (string, bool, error) {
+	val, err := exec.Command("zfs", "get", "-H", "-o", "value,source", property, dataset).Output()
+	if err != nil {
+		return "", false, err
+	}
+	fields := strings.SplitN(strings.TrimSpace(string(val)), "\t", 2)
+	if len(fields) != 2 {
+		return "", false, fmt.Errorf("unexpected zfs get output for %s on %s", property, dataset)
+	}
+	value := strings.TrimSpace(fields[0])
+	source := strings.TrimSpace(fields[1])
+	if value == "" || value == "-" || source != "local" {
+		return "", false, nil
+	}
+	return value, true, nil
+}
+
 func getOptionalZfsPropertyValue(property, dataset string) (string, bool, error) {
 	value, err := getZfsPropertyValue(property, dataset)
 	if err != nil {
@@ -1359,7 +1376,7 @@ func loadZfsClevisKey(encryptionRoot string) error {
 		pinAttr = defaultZfsClevisPinAttr
 	}
 
-	jwe, ok, err := getOptionalZfsPropertyValue(jweAttr, encryptionRoot)
+	jwe, ok, err := getLocalZfsPropertyValue(jweAttr, encryptionRoot)
 	if err != nil {
 		return err
 	}
@@ -1368,7 +1385,7 @@ func loadZfsClevisKey(encryptionRoot string) error {
 	}
 
 	pin := ""
-	if value, ok, err := getOptionalZfsPropertyValue(pinAttr, encryptionRoot); err != nil {
+	if value, ok, err := getLocalZfsPropertyValue(pinAttr, encryptionRoot); err != nil {
 		return err
 	} else if ok {
 		pin = value
