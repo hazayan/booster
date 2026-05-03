@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1176,17 +1177,26 @@ func mountZfsRoot() error {
 		return unwrapExitError(err)
 	}
 
-	// find all child datasets and mount them
+	// Find all child datasets and mount them in parent-before-child order.
 	// zfs list -H -o name -t filesystem -r $zfsDataset
 	var datasets []byte
 	datasets, err = exec.Command("zfs", "list", "-H", "-o", "name", "-t", "filesystem", "-r", zfsDataset).Output()
 	if err != nil {
 		return unwrapExitError(err)
 	}
+	datasetNames := strings.Fields(strings.TrimSpace(string(datasets)))
+	sort.SliceStable(datasetNames, func(i, j int) bool {
+		iDepth := strings.Count(datasetNames[i], "/")
+		jDepth := strings.Count(datasetNames[j], "/")
+		if iDepth != jDepth {
+			return iDepth < jDepth
+		}
+		return datasetNames[i] < datasetNames[j]
+	})
 
 	flags, options := mountFlags()
 	options = strings.Join([]string{"zfsutil", options}, ",")
-	for ds := range strings.SplitSeq(strings.TrimSpace(string(datasets)), "\n") {
+	for _, ds := range datasetNames {
 		encryptionRoot, err := getZfsPropertyValue("encryptionroot", ds)
 		if err != nil {
 			return unwrapExitError(err)
@@ -1202,6 +1212,14 @@ func mountZfsRoot() error {
 					return unwrapExitError(err)
 				}
 			}
+		}
+		canmount, err := getZfsPropertyValue("canmount", ds)
+		if err != nil {
+			return unwrapExitError(err)
+		}
+		if ds != zfsDataset && canmount == "off" {
+			debug("skipping ZFS dataset %s with canmount=off", ds)
+			continue
 		}
 		mt, err := getZfsPropertyValue("mountpoint", ds)
 		if err != nil {
