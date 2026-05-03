@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -27,8 +28,8 @@ import (
 const (
 	newRoot = "/booster.root"
 
-	defaultZfsClevisJweAttr    = "clevis:jwe"
-	defaultZfsClevisPinAttr    = "clevis:pin"
+	defaultZfsClevisJweAttr    = "kunci:jwe"
+	defaultZfsClevisPinAttr    = "kunci:pin"
 	defaultZfsClevisKeyFormat  = "plaintext"
 	defaultZfsClevisTimeoutSec = 30
 )
@@ -58,7 +59,7 @@ var (
 	zfsDataset string
 
 	errRootMountTimeout   = fmt.Errorf("Timeout waiting for root filesystem")
-	errNoZfsClevisBinding = fmt.Errorf("no ZFS clevis binding found")
+	errNoZfsClevisBinding = fmt.Errorf("no ZFS kunci binding found")
 
 	clevisHTTPClientMu sync.Mutex
 )
@@ -1374,6 +1375,28 @@ func loadZfsClevisKey(encryptionRoot string) error {
 	}
 
 	timeout := zfsClevisTimeout()
+	if strings.HasPrefix(jweAttr, "kunci:") || strings.HasPrefix(pinAttr, "kunci:") {
+		if pin != "" {
+			info("trying ZFS kunci %s unlock for %s with %s timeout", pin, encryptionRoot, timeout)
+		} else {
+			info("trying ZFS kunci unlock for %s with %s timeout", encryptionRoot, timeout)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, "kunci-client", "zfs", "unlock", "--dataset", encryptionRoot)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("kunci-client unlock timed out after %s", timeout)
+			}
+			return err
+		}
+		return nil
+	}
+
 	if pin != "" {
 		info("trying ZFS clevis %s unlock for %s with %s timeout", pin, encryptionRoot, timeout)
 	} else {
@@ -1391,10 +1414,10 @@ func loadZfsClevisKey(encryptionRoot string) error {
 
 func loadZfsKey(encryptionRoot string) error {
 	if err := loadZfsClevisKey(encryptionRoot); err == nil {
-		info("loaded ZFS key for %s from clevis binding", encryptionRoot)
+		info("loaded ZFS key for %s from automatic binding", encryptionRoot)
 		return nil
 	} else if !errors.Is(err, errNoZfsClevisBinding) {
-		warning("loading ZFS key for %s from clevis binding failed: %v", encryptionRoot, err)
+		warning("loading ZFS key for %s from automatic binding failed: %v", encryptionRoot, err)
 	}
 
 	for {

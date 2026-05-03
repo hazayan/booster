@@ -85,7 +85,30 @@ network:
 	require.ErrorContains(t, err, "network.wifi.passphrase is required")
 }
 
-func TestReadConfigZfsClevisAttrs(t *testing.T) {
+func TestReadConfigZfsKunciAttrs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "booster.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+enable_zfs: true
+zfs_kunci_attrs:
+  jwe: site:kunci_jwe
+  pin: site:kunci_pin
+zfs_clevis_key_format: raw
+zfs_kunci_timeout: 45s
+`), 0o644))
+
+	c, err := readGeneratorConfig(cfgPath)
+	require.NoError(t, err)
+	require.True(t, c.enableZfs)
+	require.Equal(t, "site:kunci_jwe", c.zfsClevisJweAttr)
+	require.Equal(t, "site:kunci_pin", c.zfsClevisPinAttr)
+	require.Equal(t, "raw", c.zfsClevisKeyFormat)
+	require.Equal(t, 45*time.Second, c.zfsClevisTimeout)
+}
+
+func TestReadConfigZfsClevisAttrsCompat(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -127,9 +150,9 @@ func TestReadConfigZfsClevisRejectsNonPositiveTimeout(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "booster.yaml")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-zfs_clevis_timeout: 0s
+zfs_kunci_timeout: 0s
 `), 0o644))
 
 	_, err := readGeneratorConfig(cfgPath)
-	require.ErrorContains(t, err, "ZFS clevis timeout must be positive")
+	require.ErrorContains(t, err, "ZFS kunci timeout must be positive")
 }

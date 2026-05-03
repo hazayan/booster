@@ -37,11 +37,10 @@ Booster advantages:
     enable_lvm: true
     enable_mdraid: true
     enable_zfs: true
-    zfs_clevis_attrs:
-      jwe: clevis:jwe
-      pin: clevis:pin
-    zfs_clevis_key_format: plaintext
-    zfs_clevis_timeout: 30s
+    zfs_kunci_attrs:
+      jwe: kunci:jwe
+      pin: kunci:pin
+    zfs_kunci_timeout: 30s
 
  * `network` node, if present, initializes the network at the boot time. It is needed if mounting a root fs requires access to the network (e.g. in case of Tang binding).
     The network can be either configured dynamically with DHCPv4 or statically within this config. In the former case `dhcp` is set to `on`.
@@ -86,11 +85,11 @@ Booster advantages:
 
  * `enable_zfs` is a flag that enables ZFS filesystem as root filesystem. This flag also makes sure all the required modules/binaries are added to the image. Note that if ZFS is enabled then `zfs=` boot option must be used instead of `root=` boot option.
 
- * `zfs_clevis_attrs` configures ZFS dataset attributes used for Clevis-style automatic key recovery. `jwe` names the ZFS user property containing the serialized Clevis JWE. `pin` optionally names the property containing the pin name for diagnostics. Defaults are `clevis:jwe` and `clevis:pin`.
+ * `zfs_kunci_attrs` configures ZFS dataset attributes used for Kunci automatic key recovery. `jwe` names the ZFS user property containing the compact Kunci JWE. `pin` names the property containing the pin name for diagnostics. Defaults are `kunci:jwe` and `kunci:pin`. The older `zfs_clevis_attrs` key is still accepted as a compatibility alias.
 
- * `zfs_clevis_key_format` configures how the plaintext recovered from the Clevis JWE is passed to `zfs load-key`. The default is `plaintext`, which writes the recovered plaintext directly and is suitable for ZFS `keyformat=passphrase`; it is also suitable for ZFS `keyformat=hex` when the recovered plaintext is already the hex string expected by ZFS. `raw` treats the recovered plaintext as binary key material and adapts it to the dataset key format; for ZFS `keyformat=raw`, the recovered key must be exactly 32 bytes.
+ * `zfs_clevis_key_format` only applies to legacy in-process Clevis recovery. Kunci-backed ZFS unlock delegates to `kunci-client zfs unlock`, which reads `kunci:jwe`, recovers the wrapping key, adapts it to the dataset `keyformat`, and runs `zfs load-key`.
 
- * `zfs_clevis_timeout` configures the HTTP timeout used while recovering Tang-backed ZFS Clevis keys before falling back to the interactive `zfs load-key` prompt. The default is `30s`. Tang-backed bindings require a `network` config block so networking is available in the initramfs before the encrypted ZFS root is mounted.
+ * `zfs_kunci_timeout` configures the timeout for `kunci-client zfs unlock` before falling back to the interactive `zfs load-key` prompt. The default is `30s`. Tang-backed bindings require a `network` config block so networking is available in the initramfs before the encrypted ZFS root is mounted. The older `zfs_clevis_timeout` key is still accepted as a compatibility alias.
 
  * `crypttab_path` path to the crypttab file to read at image build time. Defaults to `/etc/crypttab` if not set. Can be overridden by the `--crypttab` flag. If set, any read error is reported as a failure.
 

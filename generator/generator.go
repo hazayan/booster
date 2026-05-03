@@ -288,6 +288,9 @@ func generateInitRamfs(conf *generatorConfig) error {
 		if err := img.appendExtraFiles("zpool", "zfs"); err != nil {
 			return err
 		}
+		if err := img.appendExtraFiles("kunci-client"); err != nil {
+			return err
+		}
 
 		zfsCachePath := conf.zfsCachePath
 		if zfsCachePath == "" {

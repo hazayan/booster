@@ -44,7 +44,12 @@ type UserConfig struct {
 	EnableZfs            bool   `yaml:"enable_zfs"`
 	ZfsImportParams      string `yaml:"zfs_import_params"`
 	ZfsCachePath         string `yaml:"zfs_cache_path"`
-	ZfsClevisAttrs       *struct {
+	ZfsKunciAttrs        *struct {
+		Jwe string `yaml:"jwe,omitempty"`
+		Pin string `yaml:"pin,omitempty"`
+	} `yaml:"zfs_kunci_attrs,omitempty"`
+	ZfsKunciTimeout string `yaml:"zfs_kunci_timeout,omitempty"`
+	ZfsClevisAttrs  *struct {
 		Jwe string `yaml:"jwe,omitempty"`
 		Pin string `yaml:"pin,omitempty"`
 	} `yaml:"zfs_clevis_attrs,omitempty"`
@@ -190,7 +195,10 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	conf.enableZfs = u.EnableZfs
 	conf.zfsImportParams = u.ZfsImportParams
 	conf.zfsCachePath = u.ZfsCachePath
-	if u.ZfsClevisAttrs != nil {
+	if u.ZfsKunciAttrs != nil {
+		conf.zfsClevisJweAttr = strings.TrimSpace(u.ZfsKunciAttrs.Jwe)
+		conf.zfsClevisPinAttr = strings.TrimSpace(u.ZfsKunciAttrs.Pin)
+	} else if u.ZfsClevisAttrs != nil {
 		conf.zfsClevisJweAttr = strings.TrimSpace(u.ZfsClevisAttrs.Jwe)
 		conf.zfsClevisPinAttr = strings.TrimSpace(u.ZfsClevisAttrs.Pin)
 	}
@@ -200,13 +208,17 @@ func readGeneratorConfig(file string) (*generatorConfig, error) {
 	default:
 		return nil, fmt.Errorf("Unsupported ZFS clevis key format %q", conf.zfsClevisKeyFormat)
 	}
-	if u.ZfsClevisTimeout != "" {
-		timeout, err := time.ParseDuration(u.ZfsClevisTimeout)
+	zfsKunciTimeout := u.ZfsKunciTimeout
+	if zfsKunciTimeout == "" {
+		zfsKunciTimeout = u.ZfsClevisTimeout
+	}
+	if zfsKunciTimeout != "" {
+		timeout, err := time.ParseDuration(zfsKunciTimeout)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to parse ZFS clevis timeout value: %v", err)
+			return nil, fmt.Errorf("Unable to parse ZFS kunci timeout value: %v", err)
 		}
 		if timeout <= 0 {
-			return nil, fmt.Errorf("ZFS clevis timeout must be positive")
+			return nil, fmt.Errorf("ZFS kunci timeout must be positive")
 		}
 		conf.zfsClevisTimeout = timeout
 	}
