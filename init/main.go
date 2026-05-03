@@ -1381,18 +1381,22 @@ func loadZfsClevisKey(encryptionRoot string) error {
 		} else {
 			info("trying ZFS kunci unlock for %s with %s timeout", encryptionRoot, timeout)
 		}
+		if config.Network != nil {
+			if err := waitForNetworkReady(timeout); err != nil {
+				return err
+			}
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		cmd := exec.CommandContext(ctx, "kunci-client", "zfs", "unlock", "--dataset", encryptionRoot)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		output, err := cmd.CombinedOutput()
+		if err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("kunci-client unlock timed out after %s", timeout)
 			}
-			return err
+			return fmt.Errorf("kunci-client unlock failed: %w: %s", err, strings.TrimSpace(string(output)))
 		}
 		return nil
 	}

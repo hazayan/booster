@@ -44,6 +44,35 @@ func initializedInterfaces() []string {
 	return append([]string(nil), initializedNetworkState.ifnames...)
 }
 
+func waitForNetworkReady(timeout time.Duration) error {
+	if config.Network == nil {
+		return nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		links, err := netlink.LinkList()
+		if err == nil {
+			for _, link := range links {
+				attrs := link.Attrs()
+				if attrs == nil || attrs.Name == "lo" {
+					continue
+				}
+				if len(config.Network.Interfaces) > 0 && !macListContains(attrs.HardwareAddr, config.Network.Interfaces) {
+					continue
+				}
+				addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+				if err == nil && len(addrs) > 0 {
+					info("network ready on %s with %d IPv4 address(es)", attrs.Name, len(addrs))
+					return nil
+				}
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("network did not become ready within %s", timeout)
+}
+
 func parseDNSServers(raw string) ([]net.IP, error) {
 	var ips []net.IP
 	for server := range strings.SplitSeq(raw, ",") {
@@ -204,6 +233,22 @@ func waitForWifiCarrier(ifname string) error {
 	return fmt.Errorf("%s: timeout waiting for Wi-Fi association", ifname)
 }
 
+func waitForLinkCarrier(ifname string) error {
+	if config.Network.Wifi != nil && isWirelessInterface(ifname) {
+		return waitForWifiCarrier(ifname)
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		carrier, err := os.ReadFile("/sys/class/net/" + ifname + "/carrier")
+		if err == nil && strings.TrimSpace(string(carrier)) == "1" {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("%s: timeout waiting for link carrier", ifname)
+}
+
 func initializeNetworkInterface(ifname string) error {
 	link, err := netlink.LinkByName(ifname)
 	if err != nil {
@@ -253,7 +298,7 @@ linkReadinessLoop:
 	}
 
 	c := config.Network
-	if err := waitForWifiCarrier(ifname); err != nil {
+	if err := waitForLinkCarrier(ifname); err != nil {
 		return err
 	}
 	if c.Dhcp {
