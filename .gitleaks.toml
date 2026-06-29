@@ -1,0 +1,11 @@
+title = "booster gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic crypttab test fixtures use UUID-like key-device examples."
+paths = [
+  '''^generator/crypttab_test\.go$''',
+  '''^tests/assets\.go$''',
+]
