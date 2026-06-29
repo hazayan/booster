@@ -13,7 +13,6 @@ boot-errors.log
 debug.log
 limine.conf
 limine.conf.old
-CLAUDE.md
 
 # Generated docs
 docs/manpage.1
@@ -35,5 +34,3 @@ generator/assets/*.ko*
 generator/assets/*.mod
 generator/assets/*.mod.*
 generator/assets/*.o
-AGENTS.md
-.claude/
